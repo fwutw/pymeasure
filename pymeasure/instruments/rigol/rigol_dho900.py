@@ -851,14 +851,22 @@ class RigolDHO900(Instrument):
         res = self.value(f":MEAS:ITEM? {cmd}")
         return res
 
+
 class RigolDHO914(RigolDHO900):
-  pass
+    def __init__(self, adapter, name="Rigol DHO914 Oscilloscope", **kwargs):
+        super().__init__(adapter, name, **kwargs)
+
 
 class RigolDHO924(RigolDHO900):
-  pass
+    def __init__(self, adapter, name="Rigol DHO924 Oscilloscope", **kwargs):
+        super().__init__(adapter, name, **kwargs)
+
 
 class RigolDHO914S(RigolDHO900):
-  pass
+    def __init__(self, adapter, name="Rigol DHO914S Oscilloscope", **kwargs):
+        super().__init__(adapter, name, **kwargs)
+
 
 class RigolDHO924S(RigolDHO900):
-  pass
+    def __init__(self, adapter, name="Rigol DHO924S Oscilloscope", **kwargs):
+        super().__init__(adapter, name, **kwargs)
