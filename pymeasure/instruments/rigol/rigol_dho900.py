@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 #
 import logging
+from time import sleep
 from enum import Enum
 from typing import Optional
 
@@ -46,6 +47,7 @@ class Channel:
         validator=strict_discrete_set,
         values={True: "20M", False: "OFF"},
         map_values=True,
+        cast=str,
     )
 
     coupling = Instrument.control(
@@ -55,6 +57,7 @@ class Channel:
         validator=strict_discrete_set,
         values={"ac": "AC", "dc": "DC", "gnd": "GND"},
         map_values=True,
+        cast=str,
     )
 
     display = Instrument.control(
@@ -146,6 +149,7 @@ class Channel:
         validator=strict_discrete_set,
         values={"watt": "WATT", "amp": "AMP", "volt": "VOLT", "unknown": "UNKN"},
         map_values=True,
+        cast=str,
     )
 
     vernier = Instrument.control(
@@ -377,6 +381,8 @@ class RigolDHO900(Instrument):
     def __init__(self, adapter, name="Rigol DHO900 Oscilloscope", **kwargs):
         super().__init__(adapter, name, **kwargs)
         # Account for setup time for timebase_mode, waveform_points_mode
+        self.adapter.connection.timeout = 5000
+        self.adapter.connection.read_termination = '\n'
         self.ch1 = Channel(self, 1)
         self.ch2 = Channel(self, 2)
         self.ch3 = Channel(self, 3)
@@ -409,6 +415,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={"main": "MAIN", "xy": "MAIN", "roll": "ROLL"},
         map_values=True,
+        cast=str
     )
 
     timebase_mode_xy = Instrument.control(
@@ -555,6 +562,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={member.name: member.value for member in SOURCE},
         map_values=True,
+        cast=str,
     )
 
     waveform_mode = Instrument.control(
@@ -569,6 +577,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={"normal": "NORM", "maximum": "MAX", "raw": "RAW"},
         map_values=True,
+        cast=str,
     )
 
     waveform_format = Instrument.control(
@@ -580,6 +589,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={"ascii": "ASC", "word": "WORD", "byte": "BYTE"},
         map_values=True,
+        cast=str,
     )
 
     waveform_points = Instrument.control(
@@ -635,7 +645,7 @@ class RigolDHO900(Instrument):
     def waveform_data(self):
         """Get waveform data by ASCII format."""
         # Other waveform formats raise UnicodeDecodeError
-        return self.waveform_data_from("ascii")
+        return self.waveform_data_from('ascii')
 
     def waveform_data_from(self, fmt: str = "ascii") -> list:
         """Get data from binary block of sampled data points transmitted using the IEEE 488.2 arbitrary
@@ -646,20 +656,14 @@ class RigolDHO900(Instrument):
         # In 'raw' mode, the oscilloscope must be in STOP state.
         if self.waveform_mode == "raw" and self.trigger_status != "STOP":
             self.stop()
+        # Set data format
         self.waveform_format = fmt
         cmd = ":WAV:DATA?"
         if fmt == "ascii":
             return self.values(cmd)
         elif fmt == "byte" or fmt == "word":
             self.write(cmd)
-            res = self.read_bytes(-1)
-            # assert chr(res[0]) == "#"
-            # if chr(res[0]) != "#":
-            #    log.error("Incorrct return format.")
-            # read_length = int(chr(res[1]))
-            # datasize = int(res[2 : 2 + read_length])
-            # bytes_data = res[2 + read_length : 2 + read_length + datasize]
-            bytes_data = self._extract_byte_data(res)
+            bytes_data = self._read_byte_data()
 
             # Calculate real value from bytes data
             yo, yref, yinc = self.yo, self.yref, self.yinc
@@ -676,23 +680,72 @@ class RigolDHO900(Instrument):
                     data.append((v - yo - yref) * yinc)
                 return data
 
-    #################
-    ## System Setup #
-    #################
+    def capture_screen(self, fn="screen.png") -> None:
+        """Get image of oscilloscope screen in PNG file format.
 
-    def _extract_byte_data(self, res: bytes) -> bytes:
-        """Extract bytes data according to Rigol binary data format."""
-        # if chr(res[0]) != "#":
-        #    log.error("Incorrct return format.")
+        :param fn: filename, default to "screen.png".
+        """
+        old_fmt = self.waveform_format
+        if old_fmt != "byte":
+          self.waveform_format = "byte"
+          self.write(":DISP:DATA? PNG")
+          self.waveform_format = old_fmt
+        else:
+          self.write(":DISP:DATA? PNG")
+
+        #res = self.read_bytes(2).decode()
+        #assert res[0] == '#'
+        #img_size = int(self.read_bytes(int(res[1])).decode())
+        #img_bin = self.read_bytes(img_size)
+        img_byte = self._read_byte_data()
+        with open(fn, "wb") as f:
+            f.write(img_byte)
+            print(f"{fn} saved.")
+
+    def _read_byte_data(self) -> bytes:
+        """Read bytes data according to Rigol binary data format."""
+        header = self.read_bytes(2).decode()
         try:
-            assert chr(res[0]) == "#"
+            assert header[0] == "#"
         except AssertionError:
-            log.error("Incorrct return format.")
-            return res
+            log.error(f"Incorrct return format: {header}.")
+            return header
+        data_nums = int(self.read_bytes(int(header[1])).decode())
+        data = self.read_bytes(data_nums)
+        return data
 
-        read_length = int(chr(res[1]))
-        datasize = int(res[2 : 2 + read_length])
-        return res[2 + read_length : 2 + read_length + datasize]
+    ############
+    ## System ##
+    ############
+
+    def reset(self) -> None:
+      """ Reset oscilloscope to initial status. """
+      self.write("*RST")
+      return
+
+    def reboot(self) -> None:
+      """ Reboot the oscilloscope to power on status. It may take 1 min to finish rebooting. """
+      self.write(":SYST:RES")
+      print("It may take 1 min to reboot. Waiting for reconnection ...  ", end="", flush=True )
+      times = 5*60 // (12*0.25)
+      txt_animation="-\\|/"
+      while times > 0:
+        for n in range(12):
+          c = txt_animation[n%4]
+          print(f"\b{c}", end="", flush=True)
+          sleep(0.25)
+        try:
+          self.adapter.connection.open()
+          print("\nReconnected.")
+          break
+        except ValueError:
+          times -= 1
+      print(100 -times)
+      return
+
+    def check_errors(self):
+        errors = self.ask(":SYST:ERR?")
+        return errors
 
     @property
     def system_setup(self):
@@ -715,25 +768,25 @@ class RigolDHO900(Instrument):
     )
 
     trigger_mode = Instrument.control(
-        ":TRIG:MODE?", ":TRIG:MODE %s", """ Control the trigger type. """
+        ":TRIG:MODE?", ":TRIG:MODE %s",
+        """ Control the trigger type. """,
+        cast=str,
+    )
+
+    trigger_pos = Instrument.measurement(
+        ":TRIG:POS?", """ Queries the waveform trigger position. """
+    )
+
+    trigger_edge_level = Instrument.control(
+        ":TRIG:EDGE:LEV?",
+        ":TRIG:EDGE:LEV %g",
+        """ Control the waveform trigger edge level. """,
     )
 
     @property
     def display_clear(self):
         """Clear all the waveforms on the screen."""
         self.write(":DISP:CLE")
-
-    def capture_screen(self, fn="screen.png") -> None:
-        """Get image of oscilloscope screen in PNG file format.
-
-        :param fn: filename, default to "screen.png".
-        """
-        self.write(":DISP:DATA? PNG")
-        res = self.read_bytes(2)
-        img_bin = self._extract_byte_data(res)
-        with open(fn, "wb") as f:
-            f.write(img_bin)
-            print(f"{fn} saved.")
 
     def _waveform_preamble(self):
         """
@@ -804,6 +857,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={member.name: member.value for member in SOURCE},
         map_values=True,
+        cast=str,
     )
 
     @property
@@ -850,6 +904,11 @@ class RigolDHO900(Instrument):
         self.write(f":MEAS:ITEM {cmd}")
         res = self.value(f":MEAS:ITEM? {cmd}")
         return res
+
+    @property
+    def version(self):
+      res = self.ask(":SYST:VERS?")
+      return res
 
 
 class RigolDHO914(RigolDHO900):
