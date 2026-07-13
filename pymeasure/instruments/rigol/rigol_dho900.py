@@ -140,6 +140,7 @@ class Channel:
         'LAB:CONT "%s"',
         """ Control to label the channel. """,
         get_process=lambda v: str(v[1:-1]),
+        cast=str,
     )
 
     unit = Instrument.control(
@@ -181,7 +182,7 @@ class Channel:
         return self.instrument.values(f":channel{self.number}:{command}", **kwargs)
 
     def ask(self, command):
-        self.instrument.ask(f":CHAN{self.number}:{command}")
+        return self.instrument.ask(f":CHAN{self.number}:{command}")
 
     def write(self, command):
         self.instrument.write(f":CHAN{self.number}:{command}")
@@ -455,6 +456,7 @@ class RigolDHO900(Instrument):
             "user": "USER",
         },
         map_values=True,
+        cast=str,
     )
 
     timebase_href_position = Instrument.control(
@@ -463,6 +465,7 @@ class RigolDHO900(Instrument):
         """ Control user-defined reference position when the waveforms are expanded or compressed horizontally. """,
         validator=truncated_range,
         values=[-500, 500],
+        cast=int,
     )
 
     @property
@@ -493,6 +496,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={"normal": "NORM", "average": "AVER", "ultra": "ULTR", "peak": "PEAK"},
         map_values=True,
+        cast=str,
     )
 
     memory_depth = Instrument.control(
@@ -526,6 +530,7 @@ class RigolDHO900(Instrument):
             2.5e7,
             5e7,
         ),
+        cast=str,
     )
 
     sample_rate = Instrument.control(
@@ -602,6 +607,7 @@ class RigolDHO900(Instrument):
        Note that the oscilloscope may provide less than the specified nb of points. """,
         # validator=strict_discrete_set,
         # values=[100, 250, 500, 1000, 2000, 5000, 10000, 20000, 50000, 62500]
+        cast=int,
     )
 
     xinc = Instrument.measurement(
@@ -668,12 +674,14 @@ class RigolDHO900(Instrument):
             # Calculate real value from bytes data
             yo, yref, yinc = self.yo, self.yref, self.yinc
             if fmt == "byte":
-                assert len(bytes_data) == self.waveform_points
-                if len(bytes_data) != self.waveform_points:
+                pts = self.waveform_points
+                assert len(bytes_data) == pts
+                if len(bytes_data) != pts:
                     log.error("Data size mismatch.")
                 return [(i - yo - yref) * yinc for i in bytes_data]
             elif fmt == "word":
-                assert len(bytes_data) / 2 == self.waveform_points
+                pts = self.waveform_points
+                assert len(bytes_data) / 2 == pts
                 data = []
                 for i in (bytes_data[i : i + 2] for i in range(0, len(bytes_data), 2)):
                     v = int.from_bytes(i, byteorder="little")
@@ -687,17 +695,11 @@ class RigolDHO900(Instrument):
         """
         old_fmt = self.waveform_format
         if old_fmt != "byte":
-          self.waveform_format = "byte"
-          self.write(":DISP:DATA? PNG")
-          self.waveform_format = old_fmt
-        else:
-          self.write(":DISP:DATA? PNG")
-
-        #res = self.read_bytes(2).decode()
-        #assert res[0] == '#'
-        #img_size = int(self.read_bytes(int(res[1])).decode())
-        #img_bin = self.read_bytes(img_size)
+            self.waveform_format = "byte"
+        self.write(":DISP:DATA? PNG")
         img_byte = self._read_byte_data()
+        if old_fmt != "byte":
+            self.waveform_format = old_fmt
         with open(fn, "wb") as f:
             f.write(img_byte)
             print(f"{fn} saved.")
@@ -764,7 +766,7 @@ class RigolDHO900(Instrument):
             raise ValueError("Invalid channel number. Must be 1 to 4.")
 
     trigger_status = Instrument.measurement(
-        ":TRIG:STAT?", """ Queries the current trigger status. """
+        ":TRIG:STAT?", """ Queries the current trigger status. """, cast=str
     )
 
     trigger_mode = Instrument.control(
@@ -871,6 +873,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={"off": "OFF", "ch1": "CHAN1", "ch2": "CHAN2", "ch3": "CHAN3", "ch4": "CHAN4"},
         map_values=True,
+        cast=str,
     )
 
     measure_statistic_enable = Instrument.control(
@@ -902,8 +905,8 @@ class RigolDHO900(Instrument):
             cmd = f"{item.value}"
 
         self.write(f":MEAS:ITEM {cmd}")
-        res = self.value(f":MEAS:ITEM? {cmd}")
-        return res
+        vals = self.values(f":MEAS:ITEM? {cmd}")
+        return vals[0] if len(vals) == 1 else vals
 
     @property
     def version(self):
