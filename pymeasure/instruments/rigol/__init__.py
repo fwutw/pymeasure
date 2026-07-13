@@ -23,6 +23,7 @@
 #
 
 from .rigol_dg800 import DG800
+from .rigol_dho900 import RigolDHO900
 from .rigol_dho900 import RigolDHO914
 from .rigol_dho900 import RigolDHO924
 from .rigol_dho900 import RigolDHO914S
