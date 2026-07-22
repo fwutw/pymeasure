@@ -742,7 +742,6 @@ class RigolDHO900(Instrument):
           break
         except ValueError:
           times -= 1
-      print(100 -times)
       return
 
     def check_errors(self):
@@ -885,14 +884,10 @@ class RigolDHO900(Instrument):
         map_values=True,
     )
 
-    measure_statistic_reset = Instrument.control(
-        ":MEAS:STAT:RES?",
-        ":MEAS:STAT:RES %d",
-        """ Control enable/disable the statistical function. """,
-        validator=strict_discrete_set,
-        values=BOOLS,
-        map_values=True,
-    )
+    @property
+    def measure_statistic_reset(self) -> None:
+        """ Clears the history statistics data and makes statistics again. """
+        self.write(":MEAS:STAT:RES")
 
     def measure(self, item: MEASURE, src1: Optional[SOURCE] = None, src2: Optional[SOURCE] = None):
         if src1 is None and src2 is None:
