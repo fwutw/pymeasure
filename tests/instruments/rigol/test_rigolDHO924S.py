@@ -837,13 +837,9 @@ def test_measure_statistic_enable():
 def test_measure_statistic_reset():
     with expected_protocol(
         RigolDHO924S,
-        [
-            (b":MEAS:STAT:RES 1", None),
-            (b":MEAS:STAT:RES?", b"1\n"),
-        ],
+        [(b":MEAS:STAT:RES", None)],
     ) as inst:
-        inst.measure_statistic_reset = True
-        assert inst.measure_statistic_reset is True
+        inst.measure_statistic_reset
 
 
 def test_measure():
