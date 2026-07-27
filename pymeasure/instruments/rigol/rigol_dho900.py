@@ -414,7 +414,7 @@ class RigolDHO900(Instrument):
         """ A string parameter that sets the current time base. Can be 'main',
         'xy', or 'roll'. The query returns 'main' or 'roll'.""",
         validator=strict_discrete_set,
-        values={"main": "MAIN", "xy": "MAIN", "roll": "ROLL"},
+        values={"main": "MAIN", "xy": "XY", "roll": "ROLL"},
         map_values=True,
         cast=str
     )
@@ -764,6 +764,10 @@ class RigolDHO900(Instrument):
         else:
             raise ValueError("Invalid channel number. Must be 1 to 4.")
 
+    #############
+    ## Trigger ##
+    #############
+
     trigger_status = Instrument.measurement(
         ":TRIG:STAT?", """ Queries the current trigger status. """, cast=str
     )
@@ -778,13 +782,36 @@ class RigolDHO900(Instrument):
         ":TRIG:POS?", """ Queries the waveform trigger position. """
     )
 
+    ####################
+    ## Trigger - Edge ##
+    ####################
+
+    trigger_edge_src= Instrument.control(
+        ":TRIG:EDGE:SOUR?",
+        ":TRIG:EDGE:SOUR %s",
+        """ Control the waveform trigger edge source. """,
+        validator=strict_discrete_set,
+        values={member.name: member.value for member in SOURCE},
+        map_values=True,
+        cast=str,
+    )
+
+    trigger_edge_slope= Instrument.control(
+        ":TRIG:EDGE:SLOP?",
+        ":TRIG:EDGE:SLOP %s",
+        """ Control the waveform trigger edge source. """,
+        validator=strict_discrete_set,
+        values={ "pos": "POS", "neg": "NEG", "pos_or_neg": "RFAL"},
+        map_values=True,
+        cast=str,
+    )
+
     trigger_edge_level = Instrument.control(
         ":TRIG:EDGE:LEV?",
         ":TRIG:EDGE:LEV %g",
         """ Control the waveform trigger edge level. """,
     )
 
-    @property
     def display_clear(self):
         """Clear all the waveforms on the screen."""
         self.write(":DISP:CLE")
