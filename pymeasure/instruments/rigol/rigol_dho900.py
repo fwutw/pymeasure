@@ -22,7 +22,8 @@
 # THE SOFTWARE.
 #
 import logging
-from time import sleep
+import time
+import socket
 from enum import Enum
 from typing import Optional
 
@@ -285,7 +286,6 @@ class Channel:
 
 
 class RigolDHO900(Instrument):
-    # """ Represents the Keysight DSOX1102G Oscilloscope interface for interacting
     """Represents the Rigol DOH900 Series Oscilloscope interface for interacting
     with the instrument.
 
@@ -383,7 +383,7 @@ class RigolDHO900(Instrument):
         super().__init__(adapter, name, **kwargs)
         # Account for setup time for timebase_mode, waveform_points_mode
         self.adapter.connection.timeout = 5000
-        self.adapter.connection.read_termination = '\n'
+        self.adapter.connection.read_termination = "\n"
         self.ch1 = Channel(self, 1)
         self.ch2 = Channel(self, 2)
         self.ch3 = Channel(self, 3)
@@ -416,7 +416,7 @@ class RigolDHO900(Instrument):
         validator=strict_discrete_set,
         values={"main": "MAIN", "xy": "XY", "roll": "ROLL"},
         map_values=True,
-        cast=str
+        cast=str,
     )
 
     timebase_mode_xy = Instrument.control(
@@ -580,7 +580,7 @@ class RigolDHO900(Instrument):
           "raw": reads data from the internal memory. Must be in Stop state.
         """,
         validator=strict_discrete_set,
-        values={"normal": "NORM", "maximum": "MAX", "raw": "RAW"},
+        values={"normal": "NORM", "max": "MAX", "raw": "RAW"},
         map_values=True,
         cast=str,
     )
@@ -651,7 +651,7 @@ class RigolDHO900(Instrument):
     def waveform_data(self):
         """Get waveform data by ASCII format."""
         # Other waveform formats raise UnicodeDecodeError
-        return self.waveform_data_from('ascii')
+        return self.waveform_data_from("ascii")
 
     def waveform_data_from(self, fmt: str = "ascii") -> list:
         """Get data from binary block of sampled data points transmitted using the IEEE 488.2 arbitrary
@@ -700,49 +700,132 @@ class RigolDHO900(Instrument):
         img_byte = self._read_byte_data()
         if old_fmt != "byte":
             self.waveform_format = old_fmt
-        with open(fn, "wb") as f:
-            f.write(img_byte)
-            print(f"{fn} saved.")
+        if img_byte:
+            with open(fn, "wb") as f:
+                f.write(img_byte)
+                print(f"{fn} saved.")
+        else:
+            print(f"Empty data.")
 
     def _read_byte_data(self) -> bytes:
         """Read bytes data according to Rigol binary data format."""
-        header = self.read_bytes(2).decode()
+        header = self.read_bytes(2)
         try:
-            assert header[0] == "#"
+            assert header[0:1] == b"#"
         except AssertionError:
             log.error(f"Incorrct return format: {header}.")
-            return header
-        data_nums = int(self.read_bytes(int(header[1])).decode())
-        data = self.read_bytes(data_nums)
-        return data
+            self.adapter.flush_read_buffer()
+            return b""
+
+        # get header length
+        digits_count = int(header[1:2])
+        data_count = int(self.read_bytes(digits_count))
+        # Get data length
+        img_payload = self.read_bytes(data_count)
+        # For Ethernet connection, a termination is at the end and not counted
+        # in the data_count.
+        if "TCPIP" in self.adapter.resource_name:
+            self.read_bytes(1)
+
+        return img_payload
 
     ############
     ## System ##
     ############
 
-    def reset(self) -> None:
-      """ Reset oscilloscope to initial status. """
-      self.write("*RST")
-      return
+    @property
+    def id(self):
+        return self.ask("*IDN?")
 
-    def reboot(self) -> None:
-      """ Reboot the oscilloscope to power on status. It may take 1 min to finish rebooting. """
-      self.write(":SYST:RES")
-      print("It may take 1 min to reboot. Waiting for reconnection ...  ", end="", flush=True )
-      times = 5*60 // (12*0.25)
-      txt_animation="-\\|/"
-      while times > 0:
-        for n in range(12):
-          c = txt_animation[n%4]
-          print(f"\b{c}", end="", flush=True)
-          sleep(0.25)
+    def reset(self) -> None:
+        """Reset oscilloscope to initial status."""
+        self.write("*RST")
+        return
+
+    def reboot(self, timeout=180, ping_interval=3):
+        """Sends the system reset command and blocks execution until the oscilloscope
+        fully reboots and the SCPI service is ready to reconnect.
+
+        :param timeout: Maximum wait time in seconds.
+        :param ping_interval: Polling interval for connection checks in seconds.
+        """
+        self.write(":SYST:RES")
+        print("Waiting for about 1 min to reboot and reconnect it ...", end="")
+        resource_name = self.adapter.resource_name
         try:
-          self.adapter.connection.open()
-          print("\nReconnected.")
-          break
-        except ValueError:
-          times -= 1
-      return
+            self.adapter.close()
+        except Exception:
+            pass
+
+        # Grace period for the oscilloscope to initiate shutdown
+        # (prevents false positive connections from lingering sockets)
+        time.sleep(5)
+
+        # Wait for reconnect based on the connection interface
+        if "TCPIP" in resource_name:
+            self._wait_for_tcpip_reboot(resource_name, timeout, ping_interval)
+            # Re-open the VISA connection after reboot completion
+            self.adapter.connection.open()
+        else:
+            self._wait_for_usb_reboot(timeout, ping_interval)
+
+        self.adapter.connection.read_termination = "\n"
+        self.adapter.connection.timeout = 5000
+        print("done")
+
+    def _wait_for_tcpip_reboot(self, resource_name, timeout, interval):
+        """Monitors Ethernet disconnection and reconnection via low-level TCP sockets."""
+        # Parse resource name to extract IP address and port
+        # Format examples: TCPIP0::192.168.1.100::5555::SOCKET or TCPIP::192.168.1.100::INSTR
+        parts = resource_name.split("::")
+        ip = parts[1]
+        port = int(parts[2]) if len(parts) > 3 and parts[2].isdigit() else 5555
+
+        start_time = time.time()
+
+        # Phase A: Wait for the old connection to fully drop (confirms shutdown initiated)
+        while (time.time() - start_time) < timeout:
+            if not self._tcp_ping(ip, port, timeout=1):
+                break  # Device is offline (TCP socket unreachable)
+            time.sleep(1)
+
+        # Phase B: Wait for the device to come back online (TCP socket reachable again)
+        while (time.time() - start_time) < timeout:
+            if self._tcp_ping(ip, port, timeout=2):
+                # TCP port responded; allow an extra 2 seconds for SCPI software initialization
+                time.sleep(2)
+                return
+            time.sleep(interval)
+
+        raise TimeoutError(
+            f"Oscilloscope failed to come online via Ethernet ({ip}:{port}) within {timeout} seconds."
+        )
+
+    def _wait_for_usb_reboot(self, timeout, interval):
+        """Wait logic for USB interface."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                self.adapter.connection.open()
+                return
+            except Exception:
+                time.sleep(interval)
+
+        raise TimeoutError(f"Oscilloscope failed to come online via USB within {timeout} seconds.")
+
+    @staticmethod
+    def _tcp_ping(ip, port, timeout=1) -> bool:
+        """Sends a low-level TCP probe to check if the target port is reachable."""
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        try:
+            s.connect((ip, port))
+            s.shutdown(socket.SHUT_RDWR)
+            return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            return False
+        finally:
+            s.close()
 
     def check_errors(self):
         errors = self.ask(":SYST:ERR?")
@@ -773,7 +856,8 @@ class RigolDHO900(Instrument):
     )
 
     trigger_mode = Instrument.control(
-        ":TRIG:MODE?", ":TRIG:MODE %s",
+        ":TRIG:MODE?",
+        ":TRIG:MODE %s",
         """ Control the trigger type. """,
         cast=str,
     )
@@ -786,7 +870,7 @@ class RigolDHO900(Instrument):
     ## Trigger - Edge ##
     ####################
 
-    trigger_edge_src= Instrument.control(
+    trigger_edge_src = Instrument.control(
         ":TRIG:EDGE:SOUR?",
         ":TRIG:EDGE:SOUR %s",
         """ Control the waveform trigger edge source. """,
@@ -796,12 +880,12 @@ class RigolDHO900(Instrument):
         cast=str,
     )
 
-    trigger_edge_slope= Instrument.control(
+    trigger_edge_slope = Instrument.control(
         ":TRIG:EDGE:SLOP?",
         ":TRIG:EDGE:SLOP %s",
         """ Control the waveform trigger edge source. """,
         validator=strict_discrete_set,
-        values={ "pos": "POS", "neg": "NEG", "pos_or_neg": "RFAL"},
+        values={"pos": "POS", "neg": "NEG", "pos_or_neg": "RFAL"},
         map_values=True,
         cast=str,
     )
@@ -913,7 +997,7 @@ class RigolDHO900(Instrument):
 
     @property
     def measure_statistic_reset(self) -> None:
-        """ Clears the history statistics data and makes statistics again. """
+        """Clears the history statistics data and makes statistics again."""
         self.write(":MEAS:STAT:RES")
 
     def measure(self, item: MEASURE, src1: Optional[SOURCE] = None, src2: Optional[SOURCE] = None):
@@ -932,8 +1016,8 @@ class RigolDHO900(Instrument):
 
     @property
     def version(self):
-      res = self.ask(":SYST:VERS?")
-      return res
+        res = self.ask(":SYST:VERS?")
+        return res
 
 
 class RigolDHO914(RigolDHO900):
