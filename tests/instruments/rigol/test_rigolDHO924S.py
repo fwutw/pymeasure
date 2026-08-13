@@ -22,7 +22,7 @@
 # THE SOFTWARE.
 #
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 import pytest
 
 from pymeasure.test import expected_protocol
@@ -688,13 +688,75 @@ def test_system_reset():
         inst.reset()
 
 
-@patch("pymeasure.instruments.rigol.rigol_dho900.sleep")
-def test_system_reboot(mock_sleep):
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.sleep")
+def test_system_reboot_usb(mock_sleep):
     with expected_protocol(
         RigolDHO924S,
         [(b":SYST:RES", None)],
     ) as inst:
         inst.reboot()
+        assert inst.adapter.connection.read_termination == "\n"
+        assert inst.adapter.connection.timeout == 5000
+
+
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.sleep")
+@patch.object(RigolDHO924S, "_wait_for_tcpip_reboot")
+def test_system_reboot_tcpip(mock_wait_tcpip, mock_sleep):
+    with expected_protocol(
+        RigolDHO924S,
+        [(b":SYST:RES", None)],
+    ) as inst:
+        inst.adapter.resource_name = "TCPIP0::192.168.1.100::INSTR"
+        inst.reboot()
+        mock_wait_tcpip.assert_called_once_with("TCPIP0::192.168.1.100::INSTR", 180, 3)
+        assert inst.adapter.connection.read_termination == "\n"
+        assert inst.adapter.connection.timeout == 5000
+
+
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.sleep")
+def test_wait_for_tcpip_reboot(mock_sleep):
+    with expected_protocol(RigolDHO924S, []) as inst:
+        with patch.object(inst, "_tcp_ping", side_effect=[True, False, False, True]) as mock_ping:
+            inst._wait_for_tcpip_reboot("TCPIP::192.168.1.100::5555::SOCKET", timeout=10, interval=0.1)
+            assert mock_ping.call_count >= 2
+
+
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.sleep")
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.time")
+def test_wait_for_tcpip_reboot_timeout(mock_time, mock_sleep):
+    mock_time.side_effect = [0, 10, 20]
+    with expected_protocol(RigolDHO924S, []) as inst:
+        with patch.object(inst, "_tcp_ping", return_value=False):
+            with pytest.raises(TimeoutError, match="failed to come online via Ethernet"):
+                inst._wait_for_tcpip_reboot("TCPIP::192.168.1.100::INSTR", timeout=5, interval=0.1)
+
+
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.sleep")
+@patch("pymeasure.instruments.rigol.rigol_dho900.time.time")
+def test_wait_for_usb_reboot_timeout(mock_time, mock_sleep):
+    mock_time.side_effect = [0, 10, 20]
+    with expected_protocol(RigolDHO924S, []) as inst:
+        inst.adapter.connection.open.side_effect = Exception("USB open error")
+        with pytest.raises(TimeoutError, match="failed to come online via USB"):
+            inst._wait_for_usb_reboot(timeout=5, interval=0.1)
+
+
+@patch("pymeasure.instruments.rigol.rigol_dho900.socket.socket")
+def test_tcp_ping_success(mock_socket_cls):
+    mock_socket = MagicMock()
+    mock_socket_cls.return_value = mock_socket
+    assert RigolDHO900._tcp_ping("192.168.1.100", 5555, timeout=1) is True
+    mock_socket.connect.assert_called_once_with(("192.168.1.100", 5555))
+    mock_socket.close.assert_called_once()
+
+
+@patch("pymeasure.instruments.rigol.rigol_dho900.socket.socket")
+def test_tcp_ping_failure(mock_socket_cls):
+    mock_socket = MagicMock()
+    mock_socket.connect.side_effect = OSError("Connection refused")
+    mock_socket_cls.return_value = mock_socket
+    assert RigolDHO900._tcp_ping("192.168.1.100", 5555, timeout=1) is False
+    mock_socket.close.assert_called_once()
 
 
 def test_check_errors():

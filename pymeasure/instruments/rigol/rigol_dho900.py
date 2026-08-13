@@ -751,7 +751,7 @@ class RigolDHO900(Instrument):
         """
         self.write(":SYST:RES")
         print("Waiting for about 1 min to reboot and reconnect it ...", end="", flush = True)
-        resource_name = self.adapter.resource_name
+        resource_name = getattr(self.adapter, "resource_name", "")
         try:
             self.adapter.close()
         except Exception:
