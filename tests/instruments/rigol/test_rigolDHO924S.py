@@ -388,7 +388,7 @@ def test_timebase_href_position():
         assert inst.timebase_href_position == 100
 
 
-def test_timebase_configuration():
+def test_timebase_configs():
     with expected_protocol(
         RigolDHO924S,
         [
@@ -400,7 +400,7 @@ def test_timebase_configuration():
             (b":TIM:HREF:POS?", b"0\n"),
         ],
     ) as inst:
-        config = inst.timebase_configuration
+        config = inst.timebase_configs
         assert config == {
             "timebase_mode": "main",
             "timebase_mode_xy": False,
@@ -677,7 +677,7 @@ def test_read_byte_data_invalid_header():
         [(None, b"XX")],
     ) as inst:
         res = inst._read_byte_data()
-        assert res == "XX"
+        assert res == b"XX"
 
 
 def test_system_reset():
@@ -763,7 +763,7 @@ def test_display_clear():
         RigolDHO924S,
         [(b":DISP:CLE", None)],
     ) as inst:
-        inst.display_clear
+        inst.display_clear()
 
 
 def test_lock_fp_key():
@@ -807,7 +807,7 @@ def test_measure_clear():
         RigolDHO924S,
         [(b":MEAS:CLE", None)],
     ) as inst:
-        inst.measure_clear
+        inst.measure_clear()
 
 
 def test_measure_all_of():
@@ -839,7 +839,7 @@ def test_measure_statistic_reset():
         RigolDHO924S,
         [(b":MEAS:STAT:RES", None)],
     ) as inst:
-        inst.measure_statistic_reset
+        inst.measure_statistic_reset()
 
 
 def test_measure():
@@ -854,11 +854,11 @@ def test_measure():
             (b":MEAS:ITEM? RRD,CHAN1,CHAN2", b"0.001\n"),
         ],
     ) as inst:
-        assert inst.measure(RigolDHO900.MEASURE.Vmax) == 3.3
-        assert inst.measure(RigolDHO900.MEASURE.Vpp, RigolDHO900.SOURCE.ch1) == 2.0
+        assert inst.measure(RigolDHO900.MEASITEMS.Vmax) == 3.3
+        assert inst.measure(RigolDHO900.MEASITEMS.Vpp, RigolDHO900.SOURCE.ch1) == 2.0
         assert (
             inst.measure(
-                RigolDHO900.MEASURE.delay_rise_rise,
+                RigolDHO900.MEASITEMS.delay_rise_rise,
                 RigolDHO900.SOURCE.ch1,
                 RigolDHO900.SOURCE.ch2,
             )

@@ -333,7 +333,7 @@ class RigolDHO900(Instrument):
         math3 = "MATH3"
         math4 = "MATH4"
 
-    class MEASURE(Enum):
+    class MEASITEMS(Enum):
         """Measurement item name."""
 
         Vmax = "VMAX"
@@ -469,7 +469,7 @@ class RigolDHO900(Instrument):
     )
 
     @property
-    def timebase_configuration(self):
+    def timebase_configs(self):
         """Read all timebase configurations as a dict."""
         ch_setup_list = (
             "timebase_mode",
@@ -715,7 +715,7 @@ class RigolDHO900(Instrument):
         except AssertionError:
             log.error(f"Incorrct return format: {header}.")
             self.adapter.flush_read_buffer()
-            return b""
+            return header
 
         # get header length
         digits_count = int(header[1:2])
@@ -724,8 +724,8 @@ class RigolDHO900(Instrument):
         img_payload = self.read_bytes(data_count)
         # For Ethernet connection, a termination is at the end and not counted
         # in the data_count.
-        if "TCPIP" in self.adapter.resource_name:
-            self.read_bytes(1)
+        if hasattr( self.adapter, "resource_name") and "TCPIP" in self.adapter.resource_name:
+           self.read_bytes(1)
 
         return img_payload
 
@@ -750,7 +750,7 @@ class RigolDHO900(Instrument):
         :param ping_interval: Polling interval for connection checks in seconds.
         """
         self.write(":SYST:RES")
-        print("Waiting for about 1 min to reboot and reconnect it ...", end="")
+        print("Waiting for about 1 min to reboot and reconnect it ...", end="", flush = True)
         resource_name = self.adapter.resource_name
         try:
             self.adapter.close()
@@ -896,11 +896,11 @@ class RigolDHO900(Instrument):
         """ Control the waveform trigger edge level. """,
     )
 
-    def display_clear(self):
+    def display_clear(self) -> None:
         """Clear all the waveforms on the screen."""
         self.write(":DISP:CLE")
 
-    def _waveform_preamble(self):
+    def _waveform_preamble(self) -> dict:
         """
         Reads waveform preamble and converts it to a more convenient dict of values.
         """
@@ -972,8 +972,8 @@ class RigolDHO900(Instrument):
         cast=str,
     )
 
-    @property
     def measure_clear(self) -> None:
+        """ Clear measurements results. """
         self.write(":MEAS:CLE")
 
     measure_all_of = Instrument.control(
@@ -995,12 +995,17 @@ class RigolDHO900(Instrument):
         map_values=True,
     )
 
-    @property
     def measure_statistic_reset(self) -> None:
         """Clears the history statistics data and makes statistics again."""
         self.write(":MEAS:STAT:RES")
 
-    def measure(self, item: MEASURE, src1: Optional[SOURCE] = None, src2: Optional[SOURCE] = None):
+    def measure(self, item: MEASITEMS, src1: Optional[SOURCE] = None, src2: Optional[SOURCE] = None):
+        """ Read measurement data from oscilloscope.
+
+        Example:
+          >>> scope.measure(scope.MEASITEMS.Vavg, scope.SOURCE.ch1)
+
+        """
         if src1 is None and src2 is None:
             cmd = f"{item.value}"
         elif src1 is not None and src2 is None:
