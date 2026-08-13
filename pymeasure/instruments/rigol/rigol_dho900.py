@@ -173,19 +173,36 @@ class Channel:
     )
 
     def __init__(self, instrument, number):
+        """Initialize a channel instance.
+
+        :param instrument: Parent instrument instance.
+        :param int number: Channel number (1 to 4).
+        """
         self.instrument = instrument
         self.number = number
 
     def values(self, command, **kwargs):
-        """Reads a set of values from the instrument through the adapter,
-        passing on any key-word arguments.
+        """Read a set of values from the instrument channel through the adapter.
+
+        :param str command: SCPI command string without the channel prefix.
+        :param kwargs: Keyword arguments passed to the instrument's values method.
+        :return: List of parsed values.
         """
         return self.instrument.values(f":channel{self.number}:{command}", **kwargs)
 
     def ask(self, command):
+        """Send a query to the channel through the instrument adapter and return the response.
+
+        :param str command: SCPI query string without the channel prefix.
+        :return: Query response string.
+        """
         return self.instrument.ask(f":CHAN{self.number}:{command}")
 
     def write(self, command):
+        """Write a command to the channel through the instrument adapter.
+
+        :param str command: SCPI command string without the channel prefix.
+        """
         self.instrument.write(f":CHAN{self.number}:{command}")
 
     def setup(
@@ -307,6 +324,16 @@ class RigolDHO900(Instrument):
 
     BOOLS = {True: 1, False: 0}
 
+    BANDWIDTH: float = 125e6
+    ANALOG_CHANNELS: int = 4
+    DIGITAL_CHANNELS: int = 16
+    MAX_SAMPLE_RATE: float = 1.25e9
+    MAX_MEMORY_DEPTH: float = 50e6
+    RESOLUTION_BITS: int = 12
+    HAS_AFG: bool = False
+    HAS_BODE_PLOT: bool = False
+    AFG_MAX_FREQUENCY: Optional[float] = None
+
     class SOURCE(Enum):
         ch1 = "CHAN1"
         ch2 = "CHAN2"
@@ -380,6 +407,11 @@ class RigolDHO900(Instrument):
         AC_rms = "ACRM"
 
     def __init__(self, adapter, name="Rigol DHO900 Oscilloscope", **kwargs):
+        """Initialize the Rigol DHO900 oscilloscope instance.
+
+        :param adapter: Adapter instance to communicate with the instrument.
+        :param str name: Name of the instrument.
+        """
         super().__init__(adapter, name, **kwargs)
         # Account for setup time for timebase_mode, waveform_points_mode
         self.adapter.connection.timeout = 5000
@@ -390,9 +422,11 @@ class RigolDHO900(Instrument):
         self.ch4 = Channel(self, 4)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit method to ensure connection is closed."""
         self.close()
 
     def close(self):
+        """Close the adapter connection and perform instrument shutdown."""
         self.adapter.close()
         self.shutdown()
 
@@ -654,8 +688,11 @@ class RigolDHO900(Instrument):
         return self.waveform_data_from("ascii")
 
     def waveform_data_from(self, fmt: str = "ascii") -> list:
-        """Get data from binary block of sampled data points transmitted using the IEEE 488.2 arbitrary
-        block data format."""
+        """Get sampled data points from binary or ASCII block.
+
+        :param str fmt: Data format ('ascii', 'byte', or 'word').
+        :return: List of scaled floating-point waveform data values.
+        """
         if not fmt in ("ascii", "byte", "word"):
             return []
 
@@ -708,7 +745,10 @@ class RigolDHO900(Instrument):
             print(f"Empty data.")
 
     def _read_byte_data(self) -> bytes:
-        """Read bytes data according to Rigol binary data format."""
+        """Read bytes data according to Rigol binary block data format.
+
+        :return: Raw payload bytes extracted from the block.
+        """
         header = self.read_bytes(2)
         try:
             assert header[0:1] == b"#"
@@ -735,6 +775,7 @@ class RigolDHO900(Instrument):
 
     @property
     def id(self):
+        """Get the instrument identification string."""
         return self.ask("*IDN?")
 
     def reset(self) -> None:
@@ -774,7 +815,12 @@ class RigolDHO900(Instrument):
         print("done")
 
     def _wait_for_tcpip_reboot(self, resource_name, timeout, interval):
-        """Monitors Ethernet disconnection and reconnection via low-level TCP sockets."""
+        """Monitor Ethernet disconnection and reconnection via low-level TCP sockets.
+
+        :param str resource_name: VISA resource name string.
+        :param int timeout: Maximum timeout in seconds.
+        :param int interval: Polling interval in seconds.
+        """
         # Parse resource name to extract IP address and port
         # Format examples: TCPIP0::192.168.1.100::5555::SOCKET or TCPIP::192.168.1.100::INSTR
         parts = resource_name.split("::")
@@ -802,7 +848,11 @@ class RigolDHO900(Instrument):
         )
 
     def _wait_for_usb_reboot(self, timeout, interval):
-        """Wait logic for USB interface."""
+        """Wait for USB interface reconnection after reboot.
+
+        :param int timeout: Maximum timeout in seconds.
+        :param int interval: Polling interval in seconds.
+        """
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
@@ -815,7 +865,13 @@ class RigolDHO900(Instrument):
 
     @staticmethod
     def _tcp_ping(ip, port, timeout=1) -> bool:
-        """Sends a low-level TCP probe to check if the target port is reachable."""
+        """Send a low-level TCP probe to check if the target port is reachable.
+
+        :param str ip: Target IP address.
+        :param int port: Target TCP port.
+        :param float timeout: Socket connect timeout in seconds.
+        :return: True if port is reachable, False otherwise.
+        """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(timeout)
         try:
@@ -828,6 +884,10 @@ class RigolDHO900(Instrument):
             s.close()
 
     def check_errors(self):
+        """Query and return the system error messages from the oscilloscope.
+
+        :return: System error string returned by :code:`:SYST:ERR?`.
+        """
         errors = self.ask(":SYST:ERR?")
         return errors
 
@@ -842,6 +902,11 @@ class RigolDHO900(Instrument):
         self.write_bytes(b":SYST:SET " + setup_string)
 
     def ch(self, channel_number):
+        """Get the channel instance by channel number.
+
+        :param int channel_number: Channel number (1 to 4).
+        :return: Channel instance.
+        """
         if 1 <= channel_number <= 4:
             return getattr(self, f"ch{channel_number}")
         else:
@@ -901,8 +966,10 @@ class RigolDHO900(Instrument):
         self.write(":DISP:CLE")
 
     def _waveform_preamble(self) -> dict:
-        """
-        Reads waveform preamble and converts it to a more convenient dict of values.
+        """Read waveform preamble and convert it to a dictionary of parameters.
+
+        :return: Dictionary containing preamble parameters (format, type, points, count,
+            xincrement, xorigin, xreference, yincrement, yorigin, yreference).
         """
         vals = self.values(":WAV:PRE?")
         # Get values to dict
@@ -973,7 +1040,7 @@ class RigolDHO900(Instrument):
     )
 
     def measure_clear(self) -> None:
-        """ Clear measurements results. """
+        """Clear all active measurement items and results on the screen."""
         self.write(":MEAS:CLE")
 
     measure_all_of = Instrument.control(
@@ -1000,11 +1067,15 @@ class RigolDHO900(Instrument):
         self.write(":MEAS:STAT:RES")
 
     def measure(self, item: MEASITEMS, src1: Optional[SOURCE] = None, src2: Optional[SOURCE] = None):
-        """ Read measurement data from oscilloscope.
+        """Read measurement data from the oscilloscope.
+
+        :param item: Measurement item (:class:`MEASITEMS`).
+        :param src1: Primary measurement source channel (:class:`SOURCE`, optional).
+        :param src2: Secondary measurement source channel (:class:`SOURCE`, optional).
+        :return: Measurement value (float or list).
 
         Example:
           >>> scope.measure(scope.MEASITEMS.Vavg, scope.SOURCE.ch1)
-
         """
         if src1 is None and src2 is None:
             cmd = f"{item.value}"
@@ -1021,25 +1092,58 @@ class RigolDHO900(Instrument):
 
     @property
     def version(self):
+        """Get the SCPI version string of the oscilloscope."""
         res = self.ask(":SYST:VERS?")
         return res
 
 
 class RigolDHO914(RigolDHO900):
+    """Represents the Rigol DHO914 125MHz 4-channel oscilloscope."""
+
+    BANDWIDTH = 125e6
+    HAS_AFG = False
+    HAS_BODE_PLOT = False
+    AFG_MAX_FREQUENCY = None
+
     def __init__(self, adapter, name="Rigol DHO914 Oscilloscope", **kwargs):
+        """Initialize the Rigol DHO914 oscilloscope instance."""
         super().__init__(adapter, name, **kwargs)
 
 
 class RigolDHO924(RigolDHO900):
+    """Represents the Rigol DHO924 250MHz 4-channel oscilloscope."""
+
+    BANDWIDTH = 250e6
+    HAS_AFG = False
+    HAS_BODE_PLOT = False
+    AFG_MAX_FREQUENCY = None
+
     def __init__(self, adapter, name="Rigol DHO924 Oscilloscope", **kwargs):
+        """Initialize the Rigol DHO924 oscilloscope instance."""
         super().__init__(adapter, name, **kwargs)
 
 
 class RigolDHO914S(RigolDHO900):
+    """Represents the Rigol DHO914S 125MHz 4-channel oscilloscope with signal generator."""
+
+    BANDWIDTH = 125e6
+    HAS_AFG = True
+    HAS_BODE_PLOT = True
+    AFG_MAX_FREQUENCY = 25e6
+
     def __init__(self, adapter, name="Rigol DHO914S Oscilloscope", **kwargs):
+        """Initialize the Rigol DHO914S oscilloscope instance."""
         super().__init__(adapter, name, **kwargs)
 
 
 class RigolDHO924S(RigolDHO900):
+    """Represents the Rigol DHO924S 250MHz 4-channel oscilloscope with signal generator."""
+
+    BANDWIDTH = 250e6
+    HAS_AFG = True
+    HAS_BODE_PLOT = True
+    AFG_MAX_FREQUENCY = 25e6
+
     def __init__(self, adapter, name="Rigol DHO924S Oscilloscope", **kwargs):
+        """Initialize the Rigol DHO924S oscilloscope instance."""
         super().__init__(adapter, name, **kwargs)

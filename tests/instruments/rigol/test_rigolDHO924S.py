@@ -291,6 +291,33 @@ def test_init_all_classes(cls):
         assert isinstance(inst.ch4, Channel)
         assert inst.adapter.connection.timeout == 5000
         assert inst.adapter.connection.read_termination == "\n"
+        assert inst.ANALOG_CHANNELS == 4
+        assert inst.DIGITAL_CHANNELS == 16
+        assert inst.MAX_SAMPLE_RATE == 1.25e9
+        assert inst.MAX_MEMORY_DEPTH == 50e6
+        assert inst.RESOLUTION_BITS == 12
+
+
+def test_model_specifications():
+    assert RigolDHO914.BANDWIDTH == 125e6
+    assert RigolDHO914.HAS_AFG is False
+    assert RigolDHO914.HAS_BODE_PLOT is False
+    assert RigolDHO914.AFG_MAX_FREQUENCY is None
+
+    assert RigolDHO924.BANDWIDTH == 250e6
+    assert RigolDHO924.HAS_AFG is False
+    assert RigolDHO924.HAS_BODE_PLOT is False
+    assert RigolDHO924.AFG_MAX_FREQUENCY is None
+
+    assert RigolDHO914S.BANDWIDTH == 125e6
+    assert RigolDHO914S.HAS_AFG is True
+    assert RigolDHO914S.HAS_BODE_PLOT is True
+    assert RigolDHO914S.AFG_MAX_FREQUENCY == 25e6
+
+    assert RigolDHO924S.BANDWIDTH == 250e6
+    assert RigolDHO924S.HAS_AFG is True
+    assert RigolDHO924S.HAS_BODE_PLOT is True
+    assert RigolDHO924S.AFG_MAX_FREQUENCY == 25e6
 
 
 def test_exit_and_close():
@@ -680,6 +707,50 @@ def test_read_byte_data_invalid_header():
         assert res == b"XX"
 
 
+def test_read_byte_data_tcpip():
+    with expected_protocol(
+        RigolDHO924S,
+        [
+            (b":DISP:DATA? PNG", b"#14PNGD\n"),
+        ],
+    ) as inst:
+        inst.adapter.resource_name = "TCPIP0::192.168.1.100::INSTR"
+        inst.write(":DISP:DATA? PNG")
+        data = inst._read_byte_data()
+        assert data == b"PNGD"
+
+
+def test_capture_screen_empty(tmp_path):
+    fn = tmp_path / "test_screen_empty.png"
+    with expected_protocol(
+        RigolDHO924S,
+        [
+            (b":WAV:FORM?", b"BYTE\n"),
+            (b":DISP:DATA? PNG", None),
+        ],
+    ) as inst:
+        with patch.object(inst, "_read_byte_data", return_value=b""):
+            inst.capture_screen(str(fn))
+            assert not fn.exists()
+
+
+def test_waveform_data_byte_size_mismatch():
+    with expected_protocol(
+        RigolDHO924S,
+        [
+            (b":WAV:MODE?", b"NORM\n"),
+            (b":WAV:FORM BYTE", None),
+            (b":WAV:DATA?", b"#12\x80\x81"),
+            (b":WAV:YOR?", b"0\n"),
+            (b":WAV:YREF?", b"128\n"),
+            (b":WAV:YINC?", b"0.1\n"),
+            (b":WAV:POIN?", b"4\n"),
+        ],
+    ) as inst:
+        with pytest.raises(AssertionError):
+            inst.waveform_data_from("byte")
+
+
 def test_system_reset():
     with expected_protocol(
         RigolDHO924S,
@@ -934,3 +1005,17 @@ def test_version():
         [(b":SYST:VERS?", b"00.01.02\n")],
     ) as inst:
         assert inst.version == "00.01.02\n"
+
+
+def test_id():
+    with expected_protocol(
+        RigolDHO924S,
+        [(b"*IDN?", b"RIGOL TECHNOLOGIES,DHO924S,DHO9A123456789,00.01.02\n")],
+    ) as inst:
+        assert inst.id == "RIGOL TECHNOLOGIES,DHO924S,DHO9A123456789,00.01.02\n"
+
+
+def test_context_manager():
+    with expected_protocol(RigolDHO924S, []) as inst:
+        with inst as scope:
+            assert scope == inst
