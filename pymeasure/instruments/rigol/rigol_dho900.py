@@ -30,7 +30,7 @@ from pyvisa.errors import VisaIOError
 from pymeasure.instruments import Channel, Instrument
 from pymeasure.instruments.instrument import AdapterType
 from pymeasure.instruments.rigol.rigol_dho_base import DHOBase, DHOBaseChannel
-from pymeasure.instruments.validators import strict_discrete_set, truncated_range
+from pymeasure.instruments.validators import strict_discrete_set, strict_range, truncated_range
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.NullHandler())
@@ -41,6 +41,8 @@ DIGITAL_SOURCE_CHANNELS = tuple(f"D{i}" for i in range(16))
 ANALOG_SOURCE_CHANNELS = ("CHAN1", "CHAN2", "CHAN3", "CHAN4")
 MATH_SOURCE_CHANNELS = ("MATH1", "MATH2", "MATH3", "MATH4")
 ALL_SOURCES = ANALOG_SOURCE_CHANNELS + DIGITAL_SOURCE_CHANNELS + MATH_SOURCE_CHANNELS
+AFG_FUNCTIONS = ("SIN", "SQU", "RAMP", "DC", "NOIS", "ARB")
+MODULATION_FUNCTIONS = ("SIN", "SQU", "TRI", "UPR", "DNR", "NOIS")
 
 
 class DHO900Channel(DHOBaseChannel):
@@ -156,6 +158,188 @@ class DHO900Channel(DHOBaseChannel):
             "position",
         )
         return {setup: getattr(self, setup) for setup in ch_setup_list}
+
+
+class DHO900AFGChannel(Channel):
+    """Built-in 25 MHz Arbitrary Function Generator (AFG) of the Rigol DHO914S and DHO924S."""
+
+    output_enabled = Channel.control(
+        ":SOUR:OUTP:STAT?",
+        ":SOUR:OUTP:STAT %d",
+        """Control whether the AFG output is enabled (bool).""",
+        validator=strict_discrete_set,
+        values=BOOLS,
+        map_values=True,
+    )
+
+    function = Channel.control(
+        ":SOUR:FUNC?",
+        ":SOUR:FUNC %s",
+        """Control the basic waveform function (str).
+
+        Allowed values: ``"SIN"``, ``"SQU"``, ``"RAMP"``, ``"DC"``, ``"NOIS"``, or ``"ARB"``.
+        """,
+        validator=strict_discrete_set,
+        values=AFG_FUNCTIONS,
+        cast=str,
+    )
+
+    frequency = Channel.control(
+        ":SOUR:FREQ?",
+        ":SOUR:FREQ %g",
+        """Control the waveform frequency in Hz (float strictly from 2e-3 to 25e6).
+
+        Upper limit depends on waveform type: Sine 25 MHz, Square 15 MHz, Ramp 150 kHz, Arb 10 MHz.
+        """,
+        validator=strict_range,
+        values=[2e-3, 25e6],
+    )
+
+    phase = Channel.control(
+        ":SOUR:PHAS?",
+        ":SOUR:PHAS %g",
+        """Control the starting phase of basic waveforms in degrees (float strictly 0 to 360).""",
+        validator=strict_range,
+        values=[0, 360],
+    )
+
+    ramp_symmetry = Channel.control(
+        ":SOUR:FUNC:RAMP:SYMM?",
+        ":SOUR:FUNC:RAMP:SYMM %g",
+        """Control the symmetry of the ramp waveform in percent (float strictly 0 to 100).""",
+        validator=strict_range,
+        values=[0, 100],
+    )
+
+    square_duty_cycle = Channel.control(
+        ":SOUR:FUNC:SQU:DUTY?",
+        ":SOUR:FUNC:SQU:DUTY %g",
+        """Control the duty cycle of the square waveform in percent (float strictly 0 to 100).""",
+        validator=strict_range,
+        values=[0, 100],
+    )
+
+    amplitude = Channel.control(
+        ":SOUR:VOLT:AMPL?",
+        ":SOUR:VOLT:AMPL %g",
+        """Control the output amplitude in Volts (float strictly from 2e-3 to 10).
+
+        Upper limit depends on frequency: 10 V for frequency <= 10 MHz, 5 V for > 10 MHz.
+        """,
+        validator=strict_range,
+        values=[2e-3, 10.0],
+    )
+
+    offset = Channel.control(
+        ":SOUR:VOLT:OFFS?",
+        ":SOUR:VOLT:OFFS %g",
+        """Control the DC offset voltage in Volts (float strictly from -5 to 5).
+
+        Effective range depends on amplitude: +/- (max_amplitude - amplitude) / 2.
+        """,
+        validator=strict_range,
+        values=[-5.0, 5.0],
+    )
+
+    modulation_enabled = Channel.control(
+        ":SOUR:MOD:STAT?",
+        ":SOUR:MOD:STAT %d",
+        """Control whether modulation output is enabled (bool).""",
+        validator=strict_discrete_set,
+        values=BOOLS,
+        map_values=True,
+    )
+
+    modulation_type = Channel.control(
+        ":SOUR:MOD:TYP?",
+        ":SOUR:MOD:TYP %s",
+        """Control the modulation type (str strictly in ``"AM"``, ``"FM"``, ``"PM"``).""",
+        validator=strict_discrete_set,
+        values=("AM", "FM", "PM"),
+        cast=str,
+    )
+
+    am_depth = Channel.control(
+        ":SOUR:MOD:AM:DEPT?",
+        ":SOUR:MOD:AM:DEPT %g",
+        """Control the AM modulation depth in percent (float strictly from 0 to 120).""",
+        validator=strict_range,
+        values=[0, 120],
+    )
+
+    am_frequency = Channel.control(
+        ":SOUR:MOD:AM:INT:FREQ?",
+        ":SOUR:MOD:AM:INT:FREQ %g",
+        """Control the AM internal modulation frequency in Hz (float strictly 2e-3 to 1e6).""",
+        validator=strict_range,
+        values=[2e-3, 1e6],
+    )
+
+    am_function = Channel.control(
+        ":SOUR:MOD:AM:INT:FUNC?",
+        ":SOUR:MOD:AM:INT:FUNC %s",
+        """Control the AM internal modulation waveform (str).
+
+        Allowed values: ``"SIN"``, ``"SQU"``, ``"TRI"``, ``"UPR"``, ``"DNR"``, or ``"NOIS"``.
+        """,
+        validator=strict_discrete_set,
+        values=MODULATION_FUNCTIONS,
+        cast=str,
+    )
+
+    fm_deviation = Channel.control(
+        ":SOUR:MOD:FM:DEV?",
+        ":SOUR:MOD:FM:DEV %g",
+        """Control the FM frequency deviation in Hz (float).""",
+    )
+
+    fm_frequency = Channel.control(
+        ":SOUR:MOD:FM:INT:FREQ?",
+        ":SOUR:MOD:FM:INT:FREQ %g",
+        """Control the FM internal modulation frequency in Hz (float strictly 2e-3 to 1e6).""",
+        validator=strict_range,
+        values=[2e-3, 1e6],
+    )
+
+    fm_function = Channel.control(
+        ":SOUR:MOD:FM:INT:FUNC?",
+        ":SOUR:MOD:FM:INT:FUNC %s",
+        """Control the FM internal modulation waveform (str).
+
+        Allowed values: ``"SIN"``, ``"SQU"``, ``"TRI"``, ``"UPR"``, ``"DNR"``, or ``"NOIS"``.
+        """,
+        validator=strict_discrete_set,
+        values=MODULATION_FUNCTIONS,
+        cast=str,
+    )
+
+    pm_deviation = Channel.control(
+        ":SOUR:MOD:PM:DEV?",
+        ":SOUR:MOD:PM:DEV %g",
+        """Control the PM phase deviation in degrees (float strictly from 0 to 360).""",
+        validator=strict_range,
+        values=[0, 360],
+    )
+
+    pm_frequency = Channel.control(
+        ":SOUR:MOD:PM:INT:FREQ?",
+        ":SOUR:MOD:PM:INT:FREQ %g",
+        """Control the PM internal modulation frequency in Hz (float strictly 2e-3 to 1e6).""",
+        validator=strict_range,
+        values=[2e-3, 1e6],
+    )
+
+    pm_function = Channel.control(
+        ":SOUR:MOD:PM:INT:FUNC?",
+        ":SOUR:MOD:PM:INT:FUNC %s",
+        """Control the PM internal modulation waveform (str).
+
+        Allowed values: ``"SIN"``, ``"SQU"``, ``"TRI"``, ``"UPR"``, ``"DNR"``, or ``"NOIS"``.
+        """,
+        validator=strict_discrete_set,
+        values=MODULATION_FUNCTIONS,
+        cast=str,
+    )
 
 
 class RigolDHO900(DHOBase):
@@ -542,6 +726,8 @@ class RigolDHO914S(RigolDHO900):
     HAS_BODE_PLOT = True
     AFG_MAX_FREQUENCY = 25e6
 
+    afg = Instrument.ChannelCreator(DHO900AFGChannel, "")
+
     def __init__(self, adapter: AdapterType, name: str = "Rigol DHO914S Oscilloscope", **kwargs):
         super().__init__(adapter, name, **kwargs)
 
@@ -553,6 +739,8 @@ class RigolDHO924S(RigolDHO900):
     HAS_AFG = True
     HAS_BODE_PLOT = True
     AFG_MAX_FREQUENCY = 25e6
+
+    afg = Instrument.ChannelCreator(DHO900AFGChannel, "")
 
     def __init__(self, adapter: AdapterType, name: str = "Rigol DHO924S Oscilloscope", **kwargs):
         super().__init__(adapter, name, **kwargs)

@@ -26,6 +26,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pymeasure.instruments.rigol.rigol_dho900 import (
+    DHO900AFGChannel,
     DHO900Channel,
     RigolDHO900,
     RigolDHO914,
@@ -575,3 +576,126 @@ def test_measure_statistic():
         inst.measure_statistic_enable = True
         assert inst.measure_statistic_enable is True
         inst.measure_statistic_reset()
+
+
+# ================================================================== #
+#  BUILT-IN AFG CHANNEL (DHO914S / DHO924S)                           #
+# ================================================================== #
+
+
+def test_afg_availability_by_model():
+    for cls in (RigolDHO900, RigolDHO914, RigolDHO924):
+        with expected_protocol(cls, []) as inst:
+            assert not hasattr(inst, "afg")
+
+    for cls in (RigolDHO914S, RigolDHO924S):
+        with expected_protocol(cls, []) as inst:
+            assert isinstance(inst.afg, DHO900AFGChannel)
+
+
+def test_afg_basic_waveform():
+    with expected_protocol(
+        RigolDHO924S,
+        [
+            (b":SOUR:OUTP:STAT 1", None),
+            (b":SOUR:OUTP:STAT?", b"1\n"),
+            (b":SOUR:FUNC SQU", None),
+            (b":SOUR:FUNC?", b"SQU\n"),
+            (b":SOUR:FREQ 1000", None),
+            (b":SOUR:FREQ?", b"1.000000E+3\n"),
+            (b":SOUR:PHAS 45", None),
+            (b":SOUR:PHAS?", b"4.5000000000E+01\n"),
+            (b":SOUR:VOLT:AMPL 2.5", None),
+            (b":SOUR:VOLT:AMPL?", b"2.5000000000E+00\n"),
+            (b":SOUR:VOLT:OFFS 0.2", None),
+            (b":SOUR:VOLT:OFFS?", b"2.0000000000E-01\n"),
+            (b":SOUR:FUNC:RAMP:SYMM 55", None),
+            (b":SOUR:FUNC:RAMP:SYMM?", b"5.5000000000E+01\n"),
+            (b":SOUR:FUNC:SQU:DUTY 60", None),
+            (b":SOUR:FUNC:SQU:DUTY?", b"6.0000000000E+01\n"),
+        ],
+    ) as inst:
+        inst.afg.output_enabled = True
+        assert inst.afg.output_enabled is True
+        inst.afg.function = "SQU"
+        assert inst.afg.function == "SQU"
+        inst.afg.frequency = 1000
+        assert inst.afg.frequency == pytest.approx(1000.0)
+        inst.afg.phase = 45
+        assert inst.afg.phase == pytest.approx(45.0)
+        inst.afg.amplitude = 2.5
+        assert inst.afg.amplitude == pytest.approx(2.5)
+        inst.afg.offset = 0.2
+        assert inst.afg.offset == pytest.approx(0.2)
+        inst.afg.ramp_symmetry = 55
+        assert inst.afg.ramp_symmetry == pytest.approx(55.0)
+        inst.afg.square_duty_cycle = 60
+        assert inst.afg.square_duty_cycle == pytest.approx(60.0)
+
+
+def test_afg_modulation():
+    with expected_protocol(
+        RigolDHO924S,
+        [
+            (b":SOUR:MOD:STAT 1", None),
+            (b":SOUR:MOD:STAT?", b"1\n"),
+            (b":SOUR:MOD:TYP AM", None),
+            (b":SOUR:MOD:TYP?", b"AM\n"),
+            (b":SOUR:MOD:AM:DEPT 50", None),
+            (b":SOUR:MOD:AM:DEPT?", b"5.0000000000E+01\n"),
+            (b":SOUR:MOD:AM:INT:FREQ 150", None),
+            (b":SOUR:MOD:AM:INT:FREQ?", b"1.5000000000E+02\n"),
+            (b":SOUR:MOD:AM:INT:FUNC SQU", None),
+            (b":SOUR:MOD:AM:INT:FUNC?", b"SQU\n"),
+            (b":SOUR:MOD:FM:DEV 100", None),
+            (b":SOUR:MOD:FM:DEV?", b"1.0000000000E+02\n"),
+            (b":SOUR:MOD:FM:INT:FREQ 200", None),
+            (b":SOUR:MOD:FM:INT:FREQ?", b"2.0000000000E+02\n"),
+            (b":SOUR:MOD:FM:INT:FUNC TRI", None),
+            (b":SOUR:MOD:FM:INT:FUNC?", b"TRI\n"),
+            (b":SOUR:MOD:PM:DEV 90", None),
+            (b":SOUR:MOD:PM:DEV?", b"9.0000000000E+01\n"),
+            (b":SOUR:MOD:PM:INT:FREQ 300", None),
+            (b":SOUR:MOD:PM:INT:FREQ?", b"3.0000000000E+02\n"),
+            (b":SOUR:MOD:PM:INT:FUNC NOIS", None),
+            (b":SOUR:MOD:PM:INT:FUNC?", b"NOIS\n"),
+        ],
+    ) as inst:
+        inst.afg.modulation_enabled = True
+        assert inst.afg.modulation_enabled is True
+        inst.afg.modulation_type = "AM"
+        assert inst.afg.modulation_type == "AM"
+        inst.afg.am_depth = 50
+        assert inst.afg.am_depth == pytest.approx(50.0)
+        inst.afg.am_frequency = 150
+        assert inst.afg.am_frequency == pytest.approx(150.0)
+        inst.afg.am_function = "SQU"
+        assert inst.afg.am_function == "SQU"
+        inst.afg.fm_deviation = 100
+        assert inst.afg.fm_deviation == pytest.approx(100.0)
+        inst.afg.fm_frequency = 200
+        assert inst.afg.fm_frequency == pytest.approx(200.0)
+        inst.afg.fm_function = "TRI"
+        assert inst.afg.fm_function == "TRI"
+        inst.afg.pm_deviation = 90
+        assert inst.afg.pm_deviation == pytest.approx(90.0)
+        inst.afg.pm_frequency = 300
+        assert inst.afg.pm_frequency == pytest.approx(300.0)
+        inst.afg.pm_function = "NOIS"
+        assert inst.afg.pm_function == "NOIS"
+
+
+def test_afg_validation_errors():
+    with expected_protocol(RigolDHO924S, []) as inst:
+        with pytest.raises(ValueError):
+            inst.afg.function = "INVALID"
+        with pytest.raises(ValueError):
+            inst.afg.frequency = 30e6
+        with pytest.raises(ValueError):
+            inst.afg.phase = 400
+        with pytest.raises(ValueError):
+            inst.afg.amplitude = 20.0
+        with pytest.raises(ValueError):
+            inst.afg.modulation_type = "PSK"
+        with pytest.raises(ValueError):
+            inst.afg.am_depth = 150

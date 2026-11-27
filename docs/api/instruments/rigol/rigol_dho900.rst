@@ -30,3 +30,7 @@ API reference
 .. autoclass:: DHO900Channel
     :members:
     :show-inheritance:
+
+.. autoclass:: DHO900AFGChannel
+    :members:
+    :show-inheritance:
